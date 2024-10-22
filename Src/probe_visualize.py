@@ -6,6 +6,8 @@ from data_preprocess import load_data
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 import numpy as np
+import umap
+import hdbscan
 
 
 def load_models(transformer_ckpt, autoencoder_ckpt, vocab_size, device):
@@ -16,7 +18,7 @@ def load_models(transformer_ckpt, autoencoder_ckpt, vocab_size, device):
     transformer.eval()
 
     # Load Autoencoder
-    autoencoder = AutoEncoder(input_dim=128, latent_dim=64)
+    autoencoder = AutoEncoder(input_dim=128, latent_dim=512, l1_coeff=1e-3)
     autoencoder.load_state_dict(torch.load(autoencoder_ckpt, map_location=device))
     autoencoder.to(device)
     autoencoder.eval()
@@ -42,24 +44,25 @@ def probe_transformer(transformer, autoencoder, input_text, char2idx, idx2char, 
 
     return latent_np, reconstructed_np
 
-# Not sure if this is the right way to visualize the latent space´
+
 def visualize_latent_space(latent_vectors, labels=None):
-    pca = PCA(n_components=2)
-    principal_components = pca.fit_transform(latent_vectors)
-    plt.figure(figsize=(10, 8))
-    if labels is not None:
-        plt.scatter(
-            principal_components[:, 0],
-            principal_components[:, 1],
-            c=labels,
-            cmap="viridis",
-            alpha=0.5,
-        )
-    else:
-        plt.scatter(principal_components[:, 0], principal_components[:, 1], alpha=0.5)
-    plt.xlabel("Principal Component 1")
-    plt.ylabel("Principal Component 2")
-    plt.title("Latent Space Visualization")
+    # UMAP Embedding
+    umap_embedding = umap.UMAP(
+        n_neighbors=15, metric="cosine", min_dist=0.05
+    ).fit_transform(latent_vectors)
+
+    # HDBSCAN Clustering
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=3, metric="euclidean")
+    clusters = clusterer.fit_predict(umap_embedding)
+
+    plt.figure(figsize=(12, 10))
+    scatter = plt.scatter(
+        umap_embedding[:, 0], umap_embedding[:, 1], c=clusters, cmap="tab20", alpha=0.6
+    )
+    plt.colorbar(scatter, label="Cluster ID")
+    plt.xlabel("UMAP Dimension 1")
+    plt.ylabel("UMAP Dimension 2")
+    plt.title("UMAP Projection of Autoencoder Latent Space with HDBSCAN Clusters")
     plt.show()
 
 
@@ -70,7 +73,7 @@ if __name__ == "__main__":
 
     # Load Data to get vocab
     dataloader, dataset = load_data(
-        "../data/harry_potter.txt", seq_length=1024, batch_size=64
+        "../data/harry_potter.txt", seq_length=1024, batch_size=64, shuffle=False
     )
     vocab_size = dataset.vocab_size
     char2idx = dataset.char2idx
@@ -81,7 +84,7 @@ if __name__ == "__main__":
         "../checkpoints/transformer/transformer_epoch_100000.pt"  # Adjust path
     )
     autoencoder_ckpt = (
-        "../checkpoints/autoencoder/autoencoder_epoch_10000.pt"  # Adjust path
+        "../checkpoints/autoencoder/autoencoder_epoch_100000.pt"  # Adjust path
     )
     transformer, autoencoder = load_models(
         transformer_ckpt, autoencoder_ckpt, vocab_size, device

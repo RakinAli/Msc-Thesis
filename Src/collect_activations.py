@@ -11,34 +11,45 @@ def collect_mlp_activations(
     dataloader,
     device,
     activation_save_path,
-    max_prompts=200000,
-    activations_per_prompt=200,
+    max_contexts=1000000,
+    activations_per_context=200,
 ):
     model.to(device)
     model.eval()
     activations = []
+    contexts_collected = 0
 
     with torch.no_grad():
-        prompt_count = 0
         for batch_x, _ in tqdm(dataloader, desc="Collecting Activations"):
-            batch_x = batch_x.to(device)
-            _, transformer_outputs = model(batch_x)  # (batch_size, seq_length, d_model)
+            batch_size = batch_x.size(0)
+            for i in range(batch_size):
+                if contexts_collected >= max_contexts:
+                    break
+                context = batch_x[i].unsqueeze(0)  # (1, seq_length)
+                _, transformer_outputs = model(context)  # (1, seq_length, d_model)
+                # Sample 200 tokens from the context
+                seq_length = transformer_outputs.size(1)
+                if seq_length < activations_per_context:
+                    sample_indices = torch.arange(seq_length)
+                else:
+                    sample_indices = torch.randperm(seq_length)[
+                        :activations_per_context
+                    ]
+                sampled_activations = transformer_outputs[
+                    0, sample_indices, :
+                ]  # (activations_per_context, d_model)
+                activations.append(sampled_activations.cpu())
+                contexts_collected += 1
 
-            # Extract MLP activations
-            # Assuming MLP is a single layer after self-attention
-            # Modify if multiple MLP layers exist
-            # For simplicity, using transformer_outputs as MLP activations
-            # If you have access to MLP layer outputs, hook them here
+                if contexts_collected % 10000 == 0:
+                    print(f"Collected {contexts_collected} contexts")
 
-            # Example: Suppose MLP is a separate layer, use hooks to capture activations
-            # Here, we are simplifying by using transformer_outputs
-            activations.append(transformer_outputs.cpu())
-
-            prompt_count += batch_x.size(0)
-            if prompt_count * activations_per_prompt >= max_prompts:
+            if contexts_collected >= max_contexts:
                 break
 
-    activations = torch.cat(activations, dim=0)  # (num_samples, d_model)
+    activations = torch.cat(
+        activations, dim=0
+    )  # (max_contexts * activations_per_context, d_model)
     torch.save(activations, activation_save_path)
     print(f"Saved MLP activations to {activation_save_path}")
 
@@ -48,15 +59,17 @@ if __name__ == "__main__":
     seq_length = 1024
     batch_size = 64
     activation_save_path = "../activations/mlp_activations.pt"
-    max_prompts = 200000
-    activations_per_prompt = 200  # Adjust as needed
+    max_contexts = 1000000  # 1 million contexts
+    activations_per_context = 200
 
     # Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     # Load Data
-    dataloader, dataset = load_data("../data/harry_potter.txt", seq_length, batch_size)
+    dataloader, dataset = load_data(
+        "../data/harry_potter.txt", seq_length, batch_size, shuffle=False
+    )
     print("Data loaded.")
 
     # Load Transformer Model
@@ -80,6 +93,6 @@ if __name__ == "__main__":
         dataloader,
         device,
         activation_save_path,
-        max_prompts,
-        activations_per_prompt,
+        max_contexts,
+        activations_per_context,
     )

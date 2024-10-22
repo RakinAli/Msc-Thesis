@@ -26,8 +26,8 @@ def train(
     for epoch in range(1, (total_steps // len(dataloader)) + 2):
         epoch_loss = 0
         for batch_x, batch_y in tqdm(dataloader, desc=f"Epoch {epoch}"):
-            batch_x = batch_x.to(device)
-            batch_y = batch_y.to(device)
+            batch_x = batch_x.to(device, non_blocking=True)
+            batch_y = batch_y.to(device, non_blocking=True)
 
             outputs, _ = model(batch_x)
             loss = criterion(outputs.view(-1, outputs.size(-1)), batch_y.view(-1))
@@ -37,7 +37,7 @@ def train(
 
             if (step + 1) % log_interval == 0:
                 print(f"Step {step+1}, Loss: {loss.item():.4f}")
-                # Optionally, save intermediate checkpoints
+                # Save intermediate checkpoints
                 torch.save(
                     model.state_dict(),
                     os.path.join(checkpoint_path, f"transformer_step_{step+1}.pt"),
